@@ -1,10 +1,11 @@
-from asyncore import write
-from datetime import datetime
 import logging
 from requests import Session
 from bs4 import BeautifulSoup
 from time import sleep
 from logging import getLogger
+import ddddocr
+import io
+import contextlib
 
 
 class CPEBot:
@@ -19,6 +20,7 @@ class CPEBot:
             }
         )
         self.user_data = {}
+        self.site = "https://cpe.mcu.edu.tw/cpe/"
 
     def login(self):
         payload = {
@@ -30,7 +32,8 @@ class CPEBot:
 
         while True:
             try:
-                res = self.session.get("https://cpe.cse.nsysu.edu.tw/cpe/", timeout=600)
+                res = self.session.get(self.site, timeout=600)
+                print(f"{res}")
                 self.logger.info(f"[Login] Get {res.status_code}")
             except:
                 continue
@@ -43,8 +46,9 @@ class CPEBot:
         # fetch captcha
         while True:
             try:
+                print("[Login] Get Captcha")
                 resCaptcha = self.session.get(
-                    f"https://cpe.cse.nsysu.edu.tw/cpe/{captcha}", timeout=600
+                    f"{self.site}{captcha}", timeout=600
                 )
                 self.logger.info(f"[Login] Get Captcha {res.status_code}")
             except:
@@ -52,15 +56,24 @@ class CPEBot:
 
             break
 
-        with open("captcha.jpg", "wb+") as f:
+        with open("captcha.jpg", "w+b") as f:
             f.write(resCaptcha.content)
+            f.seek(0)
+            img = f.read()
 
-        captcha_code = input("驗證碼: ")
+        def get_captcha(img):
+            with contextlib.redirect_stdout(io.StringIO()):
+                captcha_code = ddddocr.DdddOcr().classification(img)
+            logging.info(f"[Login] Captcha Code: {captcha_code}")
+
+            return captcha_code
+        
+        captcha_code = get_captcha(img)
 
         while True:
             try:
                 res = self.session.post(
-                    "https://cpe.cse.nsysu.edu.tw/cpe/",
+                    self.site,
                     data={**payload, "captcha": captcha_code},
                     allow_redirects=False,
                     timeout=600,
@@ -75,7 +88,7 @@ class CPEBot:
             while True:
                 try:
                     res = self.session.get(
-                        "https://cpe.cse.nsysu.edu.tw/cpe/newest", timeout=600
+                        f"{self.site}newest", timeout=600
                     )
                     self.logger.info(f"[Login] Get Newest {res.status_code}")
                 except:
@@ -100,12 +113,15 @@ class CPEBot:
         else:
             for err in soup.select(".text-error strong"):
                 self.logger.error(err)
+            if "驗證碼輸入錯誤" in res.text:
+                self.logger.error("[Login] 驗證碼輸入錯誤")
+                self.login()
 
     def apply(self, school_id: int):
         while True:
             try:
                 res = self.session.post(
-                    "https://cpe.cse.nsysu.edu.tw/cpe/newest",
+                    f"{self.site}newest",
                     data={
                         **self.user_data,
                         "isSend": "yes",
@@ -141,7 +157,7 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
 
     bot = CPEBot("username", "password")
